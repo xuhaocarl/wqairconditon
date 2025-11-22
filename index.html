@@ -4,56 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     
-    <!-- Content Security Policy: Allows unsafe-eval for Babel Standalone and specified CDNs -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://esm.sh https://unpkg.com; connect-src 'self' https://esm.sh https://unpkg.com; img-src 'self' data:;">
-
     <title>便携小空调 3D</title>
     
-    <!-- 1. Favicon -->
+    <!-- Favicon -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>❄️</text></svg>">
-
-    <!-- 2. Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      // Suppress Tailwind CDN warning
-      const originalWarn = console.warn;
-      console.warn = function(...args) {
-        if (args[0] && typeof args[0] === 'string' && args[0].includes('cdn.tailwindcss.com')) return;
-        originalWarn.apply(console, args);
-      };
-      
-      // Polyfill process.env for libraries that expect it
-      window.process = { env: { NODE_ENV: 'production' } };
-    </script>
-
-    <!-- 3. Import Maps: Defines where to load modules from -->
-    <script type="importmap">
-{
-  "imports": {
-    "react": "https://esm.sh/react@18.2.0",
-    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-    "react-dom": "https://esm.sh/react-dom@18.2.0",
-    "three": "https://esm.sh/three@0.160.0",
-    "@react-three/fiber": "https://esm.sh/@react-three/fiber@8.15.16?external=react,react-dom,three",
-    "@react-three/drei": "https://esm.sh/@react-three/drei@9.99.0?external=react,react-dom,three,@react-three/fiber",
-    "lucide-react": "https://esm.sh/lucide-react@0.300.0?external=react",
-    "uuid": "https://esm.sh/uuid@9.0.1",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "react/": "https://aistudiocdn.com/react@^19.2.0/"
-  }
-}
-</script>
-
-    <!-- 4. Babel Standalone -->
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-    <style>
-      body { margin: 0; padding: 0; background-color: #f8fafc; overflow: hidden; touch-action: none; }
-      #root { width: 100vw; height: 100vh; }
-    </style>
   </head>
   <body>
     <div id="root"></div>
-    <script type="text/babel" data-type="module" src="./index.tsx"></script>
+    <script type="module" src="/index.tsx"></script>
   </body>
 </html>
