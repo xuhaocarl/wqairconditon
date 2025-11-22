@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 
 // Generates Brown Noise which sounds like a low rumble/fan
 const createBrownNoise = (audioContext: AudioContext) => {
@@ -6,7 +6,7 @@ const createBrownNoise = (audioContext: AudioContext) => {
   const buffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
   const data = buffer.getChannelData(0);
   let lastOut = 0;
-  
+
   for (let i = 0; i < bufferSize; i++) {
     const white = Math.random() * 2 - 1;
     data[i] = (lastOut + (0.02 * white)) / 1.02;
@@ -16,11 +16,40 @@ const createBrownNoise = (audioContext: AudioContext) => {
   return buffer;
 };
 
+// Global flag to track if audio has been unlocked
+let audioUnlocked = false;
+
 export const useAirSound = (isOn: boolean) => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const lowPassRef = useRef<BiquadFilterNode | null>(null);
+  const unlockAttemptedRef = useRef<boolean>(false);
+
+  // Unlock audio on user interaction (required for mobile browsers)
+  const unlockAudio = useCallback(async () => {
+    const ctx = audioContextRef.current;
+    if (!ctx || audioUnlocked) return;
+
+    try {
+      // Resume the audio context
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
+
+      // Play a silent buffer to unlock audio on iOS
+      const buffer = ctx.createBuffer(1, 1, 22050);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.start(0);
+
+      audioUnlocked = true;
+      console.log('Audio unlocked successfully');
+    } catch (e) {
+      console.warn('Audio unlock failed:', e);
+    }
+  }, []);
 
   useEffect(() => {
     const initAudio = () => {
@@ -38,78 +67,107 @@ export const useAirSound = (isOn: boolean) => {
 
     initAudio();
 
+    // Add event listeners for user interaction to unlock audio
+    const events = ['touchstart', 'touchend', 'mousedown', 'click'];
+
+    const handleUserInteraction = () => {
+      if (!unlockAttemptedRef.current) {
+        unlockAttemptedRef.current = true;
+        unlockAudio();
+      }
+    };
+
+    events.forEach(event => {
+      document.addEventListener(event, handleUserInteraction, { once: true, passive: true });
+    });
+
     return () => {
+      // Cleanup event listeners
+      events.forEach(event => {
+        document.removeEventListener(event, handleUserInteraction);
+      });
+
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
         try {
-            audioContextRef.current.close();
-        } catch(e) {
-            // ignore
+          audioContextRef.current.close();
+        } catch (e) {
+          // ignore
         }
       }
     };
-  }, []);
+  }, [unlockAudio]);
 
   useEffect(() => {
     const ctx = audioContextRef.current;
     if (!ctx) return;
 
     if (isOn) {
-      // Resume context if suspended (browser policy)
-      if (ctx.state === 'suspended') {
-        ctx.resume().catch(e => console.warn("Audio resume failed", e));
-      }
+      // Ensure audio is unlocked before playing
+      const playSound = async () => {
+        // Resume context if suspended (browser policy)
+        if (ctx.state === 'suspended') {
+          try {
+            await ctx.resume();
+          } catch (e) {
+            console.warn("Audio resume failed", e);
+            return;
+          }
+        }
 
-      // Create nodes
-      try {
-        const buffer = createBrownNoise(ctx);
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
-        source.loop = true;
+        // Create nodes
+        try {
+          const buffer = createBrownNoise(ctx);
+          const source = ctx.createBufferSource();
+          source.buffer = buffer;
+          source.loop = true;
 
-        const gainNode = ctx.createGain();
-        // Fade in
-        gainNode.gain.setValueAtTime(0, ctx.currentTime);
-        gainNode.gain.linearRampToValueAtTime(0.3, ctx.currentTime + 1);
+          const gainNode = ctx.createGain();
+          // Fade in
+          gainNode.gain.setValueAtTime(0, ctx.currentTime);
+          gainNode.gain.linearRampToValueAtTime(0.3, ctx.currentTime + 1);
 
-        const lowPass = ctx.createBiquadFilter();
-        lowPass.type = 'lowpass';
-        lowPass.frequency.value = 400; // Muffled sound
+          const lowPass = ctx.createBiquadFilter();
+          lowPass.type = 'lowpass';
+          lowPass.frequency.value = 400; // Muffled sound
 
-        // Connect graph
-        source.connect(lowPass);
-        lowPass.connect(gainNode);
-        gainNode.connect(ctx.destination);
-        
-        source.start();
+          // Connect graph
+          source.connect(lowPass);
+          lowPass.connect(gainNode);
+          gainNode.connect(ctx.destination);
 
-        sourceRef.current = source;
-        gainNodeRef.current = gainNode;
-        lowPassRef.current = lowPass;
-      } catch (e) {
-        console.error("Error starting sound:", e);
-      }
+          source.start();
+
+          sourceRef.current = source;
+          gainNodeRef.current = gainNode;
+          lowPassRef.current = lowPass;
+        } catch (e) {
+          console.error("Error starting sound:", e);
+        }
+      };
+
+      playSound();
 
     } else {
       // Stop sound with fade out
       if (gainNodeRef.current && sourceRef.current) {
         try {
-            const gain = gainNodeRef.current;
-            const source = sourceRef.current;
-            
-            gain.gain.cancelScheduledValues(ctx.currentTime);
-            gain.gain.setValueAtTime(gain.gain.value, ctx.currentTime);
-            gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.5);
-            
-            setTimeout(() => {
-                try {
-                    source.stop();
-                    source.disconnect();
-                } catch (e) {
-                    // ignore already stopped
-                }
-            }, 500);
-        } catch(e) {
-             console.warn("Error stopping sound", e);
+          const gain = gainNodeRef.current;
+          const source = sourceRef.current;
+
+          gain.gain.cancelScheduledValues(ctx.currentTime);
+          gain.gain.setValueAtTime(gain.gain.value, ctx.currentTime);
+          gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.5);
+
+          setTimeout(() => {
+            try {
+              source.stop();
+              source.disconnect();
+            } catch (e) {
+              // ignore already stopped
+            }
+          }, 500);
+        } catch (e) {
+          console.warn("Error stopping sound", e);
         }
       }
     }
