@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 
 // Generates Brown Noise which sounds like a low rumble/fan
 const createBrownNoise = (audioContext: AudioContext) => {
@@ -16,140 +16,89 @@ const createBrownNoise = (audioContext: AudioContext) => {
   return buffer;
 };
 
-// Global flag to track if audio has been unlocked
-let audioUnlocked = false;
-
 export const useAirSound = (isOn: boolean) => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const lowPassRef = useRef<BiquadFilterNode | null>(null);
-  const unlockAttemptedRef = useRef<boolean>(false);
-
-  // Unlock audio on user interaction (required for mobile browsers)
-  const unlockAudio = useCallback(async () => {
-    const ctx = audioContextRef.current;
-    if (!ctx || audioUnlocked) return;
-
-    try {
-      // Resume the audio context
-      if (ctx.state === 'suspended') {
-        await ctx.resume();
-      }
-
-      // Play a silent buffer to unlock audio on iOS
-      const buffer = ctx.createBuffer(1, 1, 22050);
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(ctx.destination);
-      source.start(0);
-
-      audioUnlocked = true;
-      console.log('Audio unlocked successfully');
-    } catch (e) {
-      console.warn('Audio unlock failed:', e);
-    }
-  }, []);
 
   useEffect(() => {
-    const initAudio = () => {
+    const ctx = audioContextRef.current;
+
+    const startSound = async () => {
+      // Create AudioContext only when needed (on first play)
       if (!audioContextRef.current) {
         try {
           const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-          if (AudioContextClass) {
-            audioContextRef.current = new AudioContextClass();
+          if (!AudioContextClass) {
+            console.warn("AudioContext not supported");
+            return;
           }
+          audioContextRef.current = new AudioContextClass();
         } catch (e) {
-          console.warn("AudioContext not supported or blocked", e);
+          console.warn("AudioContext creation failed", e);
+          return;
         }
       }
-    };
 
-    initAudio();
+      const context = audioContextRef.current;
 
-    // Add event listeners for user interaction to unlock audio
-    const events = ['touchstart', 'touchend', 'mousedown', 'click'];
-
-    const handleUserInteraction = () => {
-      if (!unlockAttemptedRef.current) {
-        unlockAttemptedRef.current = true;
-        unlockAudio();
-      }
-    };
-
-    events.forEach(event => {
-      document.addEventListener(event, handleUserInteraction, { once: true, passive: true });
-    });
-
-    return () => {
-      // Cleanup event listeners
-      events.forEach(event => {
-        document.removeEventListener(event, handleUserInteraction);
-      });
-
-      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      // Resume context if suspended (required for mobile browsers)
+      if (context.state === 'suspended') {
         try {
-          audioContextRef.current.close();
+          await context.resume();
+          console.log('AudioContext resumed');
+        } catch (e) {
+          console.warn("Audio resume failed", e);
+          return;
+        }
+      }
+
+      // Stop any existing sound first
+      if (sourceRef.current) {
+        try {
+          sourceRef.current.stop();
+          sourceRef.current.disconnect();
         } catch (e) {
           // ignore
         }
       }
+
+      // Create and start new sound
+      try {
+        const buffer = createBrownNoise(context);
+        const source = context.createBufferSource();
+        source.buffer = buffer;
+        source.loop = true;
+
+        const gainNode = context.createGain();
+        // Fade in
+        gainNode.gain.setValueAtTime(0, context.currentTime);
+        gainNode.gain.linearRampToValueAtTime(0.3, context.currentTime + 1);
+
+        const lowPass = context.createBiquadFilter();
+        lowPass.type = 'lowpass';
+        lowPass.frequency.value = 400; // Muffled sound
+
+        // Connect graph
+        source.connect(lowPass);
+        lowPass.connect(gainNode);
+        gainNode.connect(context.destination);
+
+        source.start();
+
+        sourceRef.current = source;
+        gainNodeRef.current = gainNode;
+        lowPassRef.current = lowPass;
+
+        console.log('Sound started successfully');
+      } catch (e) {
+        console.error("Error starting sound:", e);
+      }
     };
-  }, [unlockAudio]);
 
-  useEffect(() => {
-    const ctx = audioContextRef.current;
-    if (!ctx) return;
-
-    if (isOn) {
-      // Ensure audio is unlocked before playing
-      const playSound = async () => {
-        // Resume context if suspended (browser policy)
-        if (ctx.state === 'suspended') {
-          try {
-            await ctx.resume();
-          } catch (e) {
-            console.warn("Audio resume failed", e);
-            return;
-          }
-        }
-
-        // Create nodes
-        try {
-          const buffer = createBrownNoise(ctx);
-          const source = ctx.createBufferSource();
-          source.buffer = buffer;
-          source.loop = true;
-
-          const gainNode = ctx.createGain();
-          // Fade in
-          gainNode.gain.setValueAtTime(0, ctx.currentTime);
-          gainNode.gain.linearRampToValueAtTime(0.3, ctx.currentTime + 1);
-
-          const lowPass = ctx.createBiquadFilter();
-          lowPass.type = 'lowpass';
-          lowPass.frequency.value = 400; // Muffled sound
-
-          // Connect graph
-          source.connect(lowPass);
-          lowPass.connect(gainNode);
-          gainNode.connect(ctx.destination);
-
-          source.start();
-
-          sourceRef.current = source;
-          gainNodeRef.current = gainNode;
-          lowPassRef.current = lowPass;
-        } catch (e) {
-          console.error("Error starting sound:", e);
-        }
-      };
-
-      playSound();
-
-    } else {
-      // Stop sound with fade out
-      if (gainNodeRef.current && sourceRef.current) {
+    const stopSound = () => {
+      if (gainNodeRef.current && sourceRef.current && ctx) {
         try {
           const gain = gainNodeRef.current;
           const source = sourceRef.current;
@@ -162,6 +111,7 @@ export const useAirSound = (isOn: boolean) => {
             try {
               source.stop();
               source.disconnect();
+              console.log('Sound stopped');
             } catch (e) {
               // ignore already stopped
             }
@@ -170,6 +120,37 @@ export const useAirSound = (isOn: boolean) => {
           console.warn("Error stopping sound", e);
         }
       }
+    };
+
+    if (isOn) {
+      startSound();
+    } else {
+      stopSound();
     }
+
+    // Cleanup on unmount
+    return () => {
+      if (sourceRef.current) {
+        try {
+          sourceRef.current.stop();
+          sourceRef.current.disconnect();
+        } catch (e) {
+          // ignore
+        }
+      }
+    };
   }, [isOn]);
+
+  // Cleanup AudioContext on unmount
+  useEffect(() => {
+    return () => {
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        try {
+          audioContextRef.current.close();
+        } catch (e) {
+          // ignore
+        }
+      }
+    };
+  }, []);
 };
